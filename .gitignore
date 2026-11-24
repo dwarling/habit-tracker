@@ -1,0 +1,14 @@
+# Python virtual environments and bytecode
+.venv/
+__pycache__/
+*.pyc
+
+# Logs / line-delimited data
+*.jsonl
+
+# JavaScript dependencies (not used, but kept out just in case)
+node_modules/
+
+# Saved habit data (user data, not source)
+data/
+habits.json
