@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Habit Tracker</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #fff; --text: #22211f; --muted: #6b6862;
+    --accent: #2f7d5b; --accent-soft: #dcefe5; --border: #e3e0d8; --gold: #c98a12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a18; --card: #24241f; --text: #ecebe6; --muted: #a3a097;
+      --accent: #5fbf8f; --accent-soft: #23392d; --border: #38372f; --gold: #e6b64a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 36rem; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+  h1 { margin: 0 0 .25rem; font-size: 1.75rem; }
+  .sub { margin: 0 0 1.75rem; color: var(--muted); }
+  form { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+  input[type=text] {
+    flex: 1; padding: .65rem .8rem; font: inherit; color: inherit;
+    background: var(--card); border: 1px solid var(--border); border-radius: .5rem;
+  }
+  button {
+    font: inherit; cursor: pointer; border-radius: .5rem; border: 1px solid transparent;
+  }
+  .add { padding: .65rem 1rem; background: var(--accent); color: #fff; font-weight: 600; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+  li {
+    display: grid; grid-template-columns: auto 1fr auto; gap: .9rem; align-items: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: .75rem;
+    padding: .9rem 1rem;
+  }
+  li.done { border-color: var(--accent); }
+  .check {
+    width: 2.25rem; height: 2.25rem; border-radius: 50%;
+    border: 2px solid var(--accent); background: transparent; color: #fff;
+    font-size: 1.1rem; line-height: 1;
+  }
+  .check[aria-pressed=true] { background: var(--accent); cursor: default; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { font-size: .85rem; color: var(--muted); }
+  .bar { height: .4rem; margin-top: .35rem; background: var(--accent-soft); border-radius: 1rem; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .goal .bar > span { background: var(--gold); }
+  .goal .meta { color: var(--gold); font-weight: 600; }
+  .remove { background: none; color: var(--muted); padding: .3rem .5rem; }
+  .remove:hover { color: #c0392b; }
+  .empty { color: var(--muted); text-align: center; padding: 2rem 0; }
+  #toast {
+    position: fixed; left: 50%; bottom: 1.5rem; transform: translate(-50%, 1rem);
+    max-width: calc(100% - 2rem); padding: .8rem 1.2rem; border-radius: .6rem;
+    background: var(--text); color: var(--bg); opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast.big { background: var(--gold); color: #1a1a18; font-weight: 700; font-size: 1.1rem; }
+  #toast.err { background: #c0392b; color: #fff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Habit Tracker</h1>
+  <p class="sub" id="sub">Check off each habit once a day. 60 days makes it stick.</p>
+
+  <form id="add-form">
+    <input type="text" id="name" maxlength="100" placeholder="New habit, e.g. Drink water" aria-label="New habit name" required>
+    <button class="add" type="submit">Add</button>
+  </form>
+
+  <ul id="list"></ul>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const list = document.getElementById("list");
+const toastEl = document.getElementById("toast");
+let toastTimer;
+
+function toast(text, kind = "") {
+  toastEl.textContent = text;
+  toastEl.className = "show " + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toastEl.className = kind), kind === "big" ? 6000 : 3000);
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = res.status === 204 ? null : await res.json();
+  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  return data;
+}
+
+function render(state) {
+  const done = state.habits.filter(h => h.checked_today).length;
+  document.getElementById("sub").textContent = state.habits.length
+    ? `${done} of ${state.habits.length} done today.`
+    : "Check off each habit once a day. 60 days makes it stick.";
+
+  list.replaceChildren();
+  if (!state.habits.length) {
+    const p = document.createElement("li");
+    p.className = "empty";
+    p.style.display = "block";
+    p.textContent = "No habits yet. Add one above to get started.";
+    list.append(p);
+    return;
+  }
+  for (const h of state.habits) {
+    const li = document.createElement("li");
+    li.classList.toggle("done", h.checked_today);
+    li.classList.toggle("goal", h.goal_reached);
+
+    const check = document.createElement("button");
+    check.className = "check";
+    check.setAttribute("aria-pressed", h.checked_today);
+    check.setAttribute("aria-label", h.checked_today ? `${h.name}: done today` : `Check off ${h.name}`);
+    check.textContent = h.checked_today ? "✓" : "";
+    check.disabled = h.checked_today;
+    check.onclick = () => checkOff(h.id);
+
+    const info = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = h.name;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = h.goal_reached
+      ? `★ Goal reached: ${h.goal} / ${h.goal} days`
+      : `${h.progress} / ${h.goal} days`;
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("span");
+    fill.style.width = `${(h.progress / h.goal) * 100}%`;
+    bar.append(fill);
+    info.append(name, meta, bar);
+
+    const remove = document.createElement("button");
+    remove.className = "remove";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", `Remove ${h.name}`);
+    remove.onclick = () => removeHabit(h);
+
+    li.append(check, info, remove);
+    list.append(li);
+  }
+}
+
+async function refresh() {
+  try { render(await api("GET", "/api/habits")); }
+  catch (e) { toast("Couldn't load habits: " + e.message, "err"); }
+}
+
+async function checkOff(id) {
+  try {
+    const r = await api("POST", `/api/habits/${id}/check`);
+    toast(r.message, r.goal_reached_now ? "big" : "");
+  } catch (e) { toast(e.message, "err"); }
+  refresh();
+}
+
+async function removeHabit(h) {
+  if (!confirm(`Remove "${h.name}"? Its progress will be deleted.`)) return;
+  try { await api("DELETE", `/api/habits/${h.id}`); }
+  catch (e) { toast(e.message, "err"); }
+  refresh();
+}
+
+document.getElementById("add-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const input = document.getElementById("name");
+  try {
+    await api("POST", "/api/habits", { name: input.value });
+    input.value = "";
+  } catch (e) { toast(e.message, "err"); }
+  refresh();
+};
+
+// R4: refresh just after local midnight so an open page clears its checkmarks,
+// and whenever the tab comes back into view (timers can sleep with the laptop).
+function scheduleMidnightRefresh() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 2);
+  setTimeout(() => { refresh(); scheduleMidnightRefresh(); }, next - now);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+scheduleMidnightRefresh();
+refresh();
+</script>
+</body>
+</html>
